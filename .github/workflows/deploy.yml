@@ -20,15 +20,19 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and Push Docker Image
-        run : |
-          IMAGE=${{ secrets.DOCKER_USERNAME }}/auth-service
-          TAG=build-${{ github.run_number }}
+        run: |
+          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/auth-service"
+          BUILD_TAG="build-${{ github.run_number }}"
 
-          docker build -t $IMAGE:$TAG ./auth-service
-          docker push $$IMAGE:$TAG
-          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "Building image: $IMAGE_NAME:$BUILD_TAG"
 
-      - name: Delpoy to EC2
+          docker build -t $IMAGE_NAME:$BUILD_TAG ./auth-service
+          docker push $IMAGE_NAME:$BUILD_TAG
+
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$BUILD_TAG" >> $GITHUB_ENV
+
+      - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -36,7 +40,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/ubuntu/Swagger-FastAPI/auth-service
-            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/auth-service:${IMAGE_TAG}
-            sudo sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/auth-service:${IMAGE_TAG}|g" docker-compose.yml
+            sudo docker pull $IMAGE_NAME:$IMAGE_TAG
+            sudo sed -i "s|image: .*|image: $IMAGE_NAME:$IMAGE_TAG|g" docker-compose.yml
             sudo docker compose down
             sudo docker compose up -d

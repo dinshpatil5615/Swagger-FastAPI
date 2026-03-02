@@ -1,6 +1,6 @@
 services:
   auth-api:
-    build: .
+    image: dineshpatil0908/auth-service:latest
     container_name: auth-api
     restart: always
     env_file:

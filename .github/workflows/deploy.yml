@@ -21,7 +21,7 @@ jobs:
 
       - name: Build and Push Docker Image
         run : |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/auth-service:latest .
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/auth-service:latest ./auth-service
           docker push ${{ secrets.DOCKER_USERNAME }}/auth-service:latest
 
       - name: Delpoy to EC2

@@ -39,7 +39,11 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/auth-service"
+            IMAGE_TAG="build-${{ github.run_number }}"
+
             cd /home/ubuntu/Swagger-FastAPI/auth-service
+
             sudo docker pull $IMAGE_NAME:$IMAGE_TAG
             sudo sed -i "s|image: .*|image: $IMAGE_NAME:$IMAGE_TAG|g" docker-compose.yml
             sudo docker compose down

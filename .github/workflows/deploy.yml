@@ -69,7 +69,7 @@ jobs:
         # ----------------------------
         - name: Build Docker Image
           run: |
-            docker build -t fastapi-app .
+            docker build -t fastapi-app ./auth-service
 
         # ----------------------------
         # Container Security Scan

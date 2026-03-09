@@ -1,50 +1,104 @@
-name: Deploy to EC2
+name: DevSecOps CI/CD Pipeline
 
-on: 
+on:
   push:
     branches:
       - main
 
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+
 jobs:
-  deploy:
+  security-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+        - name: Checkout Code
+          uses: actions/checkout@v4
 
-      - name: login to dockerhub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+        # ----------------------------
+        # Python Security Scan (SAST)
+        # ----------------------------
+        - name: Install Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: "3.11"
 
-      - name: Build and Push Docker Image
-        run: |
-          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/auth-service"
-          BUILD_TAG="build-${{ github.run_number }}"
+        - name: Run Bandit Security Scan
+          run: |
+            pip install bandit
+            bandit -r app
 
-          echo "Building image: $IMAGE_NAME:$BUILD_TAG"
+        # ----------------------------
+        # Dependency Vulnerability Scan
+        # ----------------------------
+        - name: Scan Dependencies
+          run: |
+            pip install pip-audit
+            pip-audit
 
-          docker build -t $IMAGE_NAME:$BUILD_TAG ./auth-service
-          docker push $IMAGE_NAME:$BUILD_TAG
+        # ----------------------------
+        # Terraform Security Scan
+        # ----------------------------
+        - name: Terraform Security Scan
+          run: |
+            pip install checkov
+            checkov -d terraform/
 
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$BUILD_TAG" >> $GITHUB_ENV
+        # ----------------------------
+        # Configure AWS Credentials
+        # ----------------------------
+        - name: Configure AWS
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/auth-service"
-            IMAGE_TAG="build-${{ github.run_number }}"
+        # ----------------------------
+        # Login to ECR
+        # ----------------------------
+        - name: Login to ECR
+          uses: aws-actions/amazon-ecr-login@v2
 
-            cd /home/ubuntu/Swagger-FastAPI/auth-service
+        # ----------------------------
+        # Build Docker Image
+        # ----------------------------
+        - name: Build Docker Image
+          run: |
+            docker build -t fastapi-app .
 
-            sudo docker pull $IMAGE_NAME:$IMAGE_TAG
-            sed -i "s|image: dineshpatil0908/auth-service:.*|image: $IMAGE_NAME:$IMAGE_TAG|g" docker-compose.yml
-            sudo docker compose down
-            sudo docker compose up -d
+        # ----------------------------
+        # Container Security Scan
+        # ----------------------------
+        - name: Scan Docker Image
+          uses: aquasecurity/trivy-action@master
+          with:
+            image-ref: fastapi-app:latest
+
+        # ----------------------------
+        # Tag Docker Image
+        # ----------------------------
+        - name: Tag Image
+          run: |
+            docker tag fastapi-app:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+
+        # ----------------------------
+        # Push Image to ECR
+        # ----------------------------
+        - name: Push Image
+          run: |
+            docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+
+        # ----------------------------
+        # Deploy to ECS
+        # ----------------------------
+        - name: Deploy ECS Service
+          run: |
+            aws ecs update-service \
+              --cluster $ECS_CLUSTER \
+              --service $ECS_SERVICE \
+              --force-new-deployment

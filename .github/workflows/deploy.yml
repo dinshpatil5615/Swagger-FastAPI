@@ -44,7 +44,7 @@ jobs:
 
     #---configure aws credentials
       - name: AWS configure
-        uses: actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-key: ${{ secrets.AWS_SECRET_KEY }}

@@ -7,7 +7,7 @@ on:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  AWS_REPOSITORY: ${{ secrets.AWS_REPOSITORY }}
   ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
   ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
 
@@ -16,89 +16,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-        - name: Checkout Code
-          uses: actions/checkout@v4
+      - name: checkout code
+        uses: actions/checkout@v4
 
-        # ----------------------------
-        # Python Security Scan (SAST)
-        # ----------------------------
-        - name: Install Python
-          uses: actions/setup-python@v5
-          with:
-            python-version: "3.11"
+    #---Python-security scan (SAST)
+      - name: install python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-        - name: Run Bandit Security Scan
-          run: |
-            pip install bandit
-            bandit -r app
+      - name: Run Bandit security scan
+        run: |
+          pip install bandit
+          bandit -r app
 
-        # ----------------------------
-        # Dependency Vulnerability Scan
-        # ----------------------------
-        - name: Scan Dependencies
-          run: |
-            pip install pip-audit
-            pip-audit
+    #---Dependecy vulnerablity scan 
+      - name: Scan dependencies
+        run: |
+          pip install pip-audit
+          pip-audit
 
-        # ----------------------------
-        # Terraform Security Scan
-        # ----------------------------
-        - name: Terraform Security Scan
-          run: |
-            pip install checkov
-            checkov -d terraform/
+    #---Terraform security scan
+      - name: Terraform security scan
+        run: |
+          pip install checkov
+          checkov -d terraform/
 
-        # ----------------------------
-        # Configure AWS Credentials
-        # ----------------------------
-        - name: Configure AWS
-          uses: aws-actions/configure-aws-credentials@v4
-          with:
-            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            aws-region: ${{ secrets.AWS_REGION }}
+    #---configure aws credentials
+      - name: AWS configure
+        uses: actions/configure-aws-credentials@v4
+        with:
+          aws-access-key: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+        
+    #---login to ECR
+      - name: login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-        # ----------------------------
-        # Login to ECR
-        # ----------------------------
-        - name: Login to ECR
-          uses: aws-actions/amazon-ecr-login@v2
+    #---Build docker image
+      - name: Build Docker image
+        run: |
+          docker build -t fastapi-app ./auth-service
 
-        # ----------------------------
-        # Build Docker Image
-        # ----------------------------
-        - name: Build Docker Image
-          run: |
-            docker build -t fastapi-app ./auth-service
+    #---container security scan
+      - name: Scan docker image
+        uses: aquasecurity/trivy-action@master
+        with: 
+          image-ref: fastapi-app:latest
 
-        # ----------------------------
-        # Container Security Scan
-        # ----------------------------
-        - name: Scan Docker Image
-          uses: aquasecurity/trivy-action@master
-          with:
-            image-ref: fastapi-app:latest
+    #---Tag docker image
+      - name: Tag image
+        run:
+          docker tag fastapi-app:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
 
-        # ----------------------------
-        # Tag Docker Image
-        # ----------------------------
-        - name: Tag Image
-          run: |
-            docker tag fastapi-app:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+    #---Push image to ECR
+      - name: Push Image
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
 
-        # ----------------------------
-        # Push Image to ECR
-        # ----------------------------
-        - name: Push Image
-          run: |
-            docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
-
-        # ----------------------------
-        # Deploy to ECS
-        # ----------------------------
-        - name: Deploy ECS Service
-          run: |
-            aws ecs update-service \
-              --cluster $ECS_CLUSTER \
-              --service $ECS_SERVICE \
-              --force-new-deployment
+    #---Deploy to ECS
+      - name: Deploy ECS Service
+        run: |
+          aws ecs update-service \
+          --cluster $ECS_CLUSTER \
+          --service $ECS_SERVICE \
+          --force-new-deployment

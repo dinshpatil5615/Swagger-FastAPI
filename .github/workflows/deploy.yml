@@ -34,7 +34,7 @@ jobs:
       - name: Scan dependencies
         run: |
           pip install pip-audit
-          pip-audit
+          pip-audit --strict
 
     #---Terraform security scan
       - name: Terraform security scan
@@ -61,28 +61,30 @@ jobs:
 
     #---container security scan
       - name: Scan docker image
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.20.0
         with: 
-          image-ref: fastapi-app:latest
+          image-ref: fastapi-app:${{ github.run_number }}
 
     #---Tag docker image
       - name: Tag image
         run: |
-          docker tag fastapi-app:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
-          docker tag fastapi-app:${{ github.run_number }} $ECR_REPOSITORY:${{ github.run_number }}
-          docker tag fastapi-app:${{ github.run_number }} $ECR_REPOSITORY:latest
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}
+    
+          docker tag fastapi-app:${{ github.run_number }} $IMAGE_URI:${{ github.run_number }}
+          docker tag fastapi-app:${{ github.run_number }} $IMAGE_URI:latest
 
     #---Push image to ECR
       - name: Push Image
         run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest          
-          docker push $ECR_REPOSITORY:${{ github.run_number }}
-          docker push $ECR_REPOSITORY:latest
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}
+    
+          docker push $IMAGE_URI:${{ github.run_number }}
+          docker push $IMAGE_URI:latest
 
     #---Deploy to ECS
       - name: Deploy ECS Service
         run: |
           aws ecs update-service \
-          --cluster $ECS_CLUSTER \
-          --service $ECS_SERVICE \
-          --force-new-deployment
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment

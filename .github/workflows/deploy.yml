@@ -68,14 +68,14 @@ jobs:
     #---Tag docker image
       - name: Tag image
         run: |
-          # docker tag fastapi-app:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
+          docker tag fastapi-app:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
           docker tag fastapi-app:${{ github.run_number }} $ECR_REPOSITORY:${{ github.run_number }}
           docker tag fastapi-app:${{ github.run_number }} $ECR_REPOSITORY:latest
 
     #---Push image to ECR
       - name: Push Image
         run: |
-          # docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest          
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest          
           docker push $ECR_REPOSITORY:${{ github.run_number }}
           docker push $ECR_REPOSITORY:latest
 

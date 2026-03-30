@@ -61,9 +61,9 @@ jobs:
 
     #---container security scan
       - name: Scan docker image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with: 
-          image-ref: fastapi-app:latest
+          image-ref: fastapi-app:${{ github.run_number }}
 
     #---Tag docker image
       - name: Tag image

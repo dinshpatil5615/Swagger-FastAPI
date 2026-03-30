@@ -20,7 +20,7 @@ resource "aws_subnet" "public_1" {
   vpc_id = aws_vpc.main_vpc.id
   cidr_block = "10.0.1.0/24"
   availability_zone = "${var.aws_region}a"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 
   tags = {
     Name = "Public-subnet-1"
@@ -31,7 +31,7 @@ resource "aws_subnet" "public_2" {
   cidr_block = "10.0.2.0/24"
   vpc_id = aws_vpc.main_vpc.id
   availability_zone = "${var.aws_region}b"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 
   tags = {
     Name = "Public-subnet-2"
@@ -83,10 +83,11 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
   egress {
-    from_port = 0
-    to_port = 0
-    protocol = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow outbound to ECS only"
+    from_port = 8000
+    to_port = 8000
+    protocol = "tcp"
+    cidr_blocks = [aws_security_group.ecs_sg.id]
   }
   tags = {
     Name = "ecs-alb-sg"
@@ -107,9 +108,9 @@ resource "aws_security_group" "ecs_sg" {
     }
 
     egress {
-        from_port = 0
-        to_port = 0
-        protocol = "-1"
+        from_port = 443
+        to_port = 443
+        protocol = "tcp"
         cidr_blocks = ["0.0.0.0/0"]
     }
     tags = {
@@ -125,6 +126,50 @@ resource "aws_wafv2_web_acl" "alb_waf" {
     allow {}
   }
 
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "common-rule"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "ecs-waf"
@@ -137,6 +182,15 @@ resource "aws_wafv2_web_acl_association" "alb_assoc" {
   web_acl_arn  = aws_wafv2_web_acl.alb_waf.arn
 }
 
+resource "aws_s3_bucket" "waf_logs" {
+  bucket = "fastapi-terraform-state-12345"  # make this UNIQUE
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "waf_logging" {
+  resource_arn            = aws_wafv2_web_acl.alb_waf.arn
+  log_destination_configs = [aws_s3_bucket.waf_logs.arn]
+}
+
 resource "aws_lb" "app_alb" {
   name = "ecs-app-alb"
   load_balancer_type = "application"
@@ -145,6 +199,12 @@ resource "aws_lb" "app_alb" {
     aws_subnet.public_1.id ,
     aws_subnet.public_2.id
   ]
+  enable_deletion_protection = true
+  access_logs {
+    bucket  = "fastapi-terraform-state-12345"
+    enabled = true
+  }
+  drop_invalid_header_fields = true
 
   tags = {
     Name = "ecs-app-alb"
@@ -185,7 +245,10 @@ resource "aws_lb_listener" "http_listener" {
 
 resource "aws_ecs_cluster" "app_cluster" {
   name = "ecs-app-cluster"
-
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
   tags = {
     Name = "ecs-app-cluster"
   }
@@ -193,7 +256,7 @@ resource "aws_ecs_cluster" "app_cluster" {
 
 resource "aws_cloudwatch_log_group" "ecs_logs" {
   name = "/ecs/app"
-  retention_in_days = 7
+  retention_in_days = 365
 }
 
 resource "aws_iam_role" "ecs_task_execution_role" {
@@ -233,6 +296,7 @@ resource "aws_ecs_task_definition" "app_task" {
       image = "272206396644.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest"
 
       essential = true
+      "readonlyRootFilesystem": true
 
 
       portMappings = [
@@ -292,5 +356,14 @@ resource "aws_ecs_service" "app_service" {
 
 resource "aws_ecr_repository" "fastapi_repo" {
   name = "fastapi-repo"
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "KMS"
+  }
 }
 

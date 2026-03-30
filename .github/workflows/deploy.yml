@@ -58,6 +58,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build -t fastapi-app:${{ github.run_number }} ./auth-service
+  
 
     #---container security scan
       - name: Scan docker image

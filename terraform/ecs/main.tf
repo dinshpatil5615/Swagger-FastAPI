@@ -48,7 +48,7 @@ resource "aws_route_table" "public_rt" {
 
   tags = {
     Name = "public-route-table"
-  }
+  } 
 }
 
 resource "aws_route_table_association" "public_1_asso" {
@@ -117,6 +117,26 @@ resource "aws_security_group" "ecs_sg" {
     }
 }
 
+resource "aws_wafv2_web_acl" "alb_waf" {
+  name  = "ecs-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "ecs-waf"
+    sampled_requests_enabled   = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "alb_assoc" {
+  resource_arn = aws_lb.app_alb.arn
+  web_acl_arn  = aws_wafv2_web_acl.alb_waf.arn
+}
+
 resource "aws_lb" "app_alb" {
   name = "ecs-app-alb"
   load_balancer_type = "application"
@@ -152,24 +172,10 @@ resource "aws_lb_target_group" "app_tg" {
   }
 }
 
-resource "aws_lb_target_group" "blue" {
-  name = "ecs-blue-tg"
-  port = 80
-  protocol = "HTTP"
-  vpc_id = aws_vpc.main_vpc.id
-}
-
-resource "aws_lb_target_group" "green" {
-  name = "ecs-green-tg"
-  port = 80
-  protocol = "HTTP"
-  vpc_id = aws_vpc.main_vpc.id
-}
-
 resource "aws_lb_listener" "http_listener" {
   load_balancer_arn = aws_lb.app_alb.arn
-  port = 80
-  protocol = "HTTP"
+  port = 443
+  protocol = "HTTPS"
 
   default_action {
     type = "forward"
@@ -287,3 +293,4 @@ resource "aws_ecs_service" "app_service" {
 resource "aws_ecr_repository" "fastapi_repo" {
   name = "fastapi-repo"
 }
+

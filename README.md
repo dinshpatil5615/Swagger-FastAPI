@@ -126,7 +126,7 @@ Access FastAPI Swagger UI.
 │   ├── backend.tf
 │   └── provider.tf
 ├── .github/workflows/
-│   └── pipeline.yml
+│   └── deploy.yml
 ├── Dockerfile
 ├── requirements.txt
 ├── .gitignore

@@ -61,7 +61,7 @@ jobs:
 
     #---container security scan
       - name: Scan docker image
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@0.21.0
         with: 
           image-ref: fastapi-app:${{ github.run_number }}
 
@@ -88,4 +88,3 @@ jobs:
             --cluster $ECS_CLUSTER \
             --service $ECS_SERVICE \
             --force-new-deployment
-            

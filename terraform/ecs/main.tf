@@ -17,14 +17,14 @@ resource "aws_subnet" "public_1" {
   vpc_id                  = aws_vpc.main_vpc.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 }
 
 resource "aws_subnet" "public_2" {
   vpc_id                  = aws_vpc.main_vpc.id
   cidr_block              = "10.0.2.0/24"
   availability_zone       = "${var.aws_region}b"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 }
 
 resource "aws_route_table" "public_rt" {
@@ -74,7 +74,6 @@ resource "aws_security_group" "alb_sg" {
   }
 
   egress {
-    description = "Allow all outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -184,6 +183,8 @@ resource "aws_s3_bucket_public_access_block" "waf_block" {
 
   block_public_acls   = true
   block_public_policy = true
+  ignore_public_acls  = true
+  restrict_public_buckets = true
 }
 
 # ✅ MERGED POLICY
@@ -257,6 +258,10 @@ resource "aws_lb_listener" "http_listener" {
 
 resource "aws_ecs_cluster" "app_cluster" {
   name = "ecs-app-cluster"
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
 }
 
 resource "aws_cloudwatch_log_group" "ecs_logs" {
@@ -334,7 +339,7 @@ resource "aws_ecs_service" "app_service" {
   network_configuration {
     subnets         = [aws_subnet.public_1.id, aws_subnet.public_2.id]
     security_groups = [aws_security_group.ecs_sg.id]
-    assign_public_ip = true   # ✅ FIXED
+    assign_public_ip = false   # ✅ FIXED
   }
 
   load_balancer {

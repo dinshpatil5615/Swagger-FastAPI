@@ -8,6 +8,15 @@ resource "aws_vpc" "main_vpc" {
   tags = { Name = "ecs-vpc" }
 }
 
+resource "aws_flow_log" "vpc_flow_logs" {
+  vpc_id = aws_vpc.main_vpc.id
+  traffic_type = "ALL"
+
+  log_destination_type = "cloud-watch-logs"
+  log_destination       = aws_cloudwatch_log_group.ecs_logs.arn
+  iam_role_arn         = aws_iam_role.ecs_task_execution_role.arn
+}
+
 resource "aws_internet_gateway" "IGW" {
   vpc_id = aws_vpc.main_vpc.id
 }
@@ -17,14 +26,14 @@ resource "aws_subnet" "public_1" {
   vpc_id                  = aws_vpc.main_vpc.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = false
+  map_public_ip_on_launch = true
 }
 
 resource "aws_subnet" "public_2" {
   vpc_id                  = aws_vpc.main_vpc.id
   cidr_block              = "10.0.2.0/24"
   availability_zone       = "${var.aws_region}b"
-  map_public_ip_on_launch = false
+  map_public_ip_on_launch = true
 }
 
 resource "aws_route_table" "public_rt" {
@@ -58,15 +67,15 @@ resource "aws_security_group" "alb_sg" {
   vpc_id      = aws_vpc.main_vpc.id
 
   ingress {
-    description = "Allow HTTP"
+    description = "Allow HTTP from internet"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = ["0.0.0.0/0"] # OK for ALB (public)
   }
 
   ingress {
-    description = "Allow HTTPS"
+    description = "Allow HTTPS from internet"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -74,6 +83,7 @@ resource "aws_security_group" "alb_sg" {
   }
 
   egress {
+    description = "Allow outbound to ECS"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -182,33 +192,70 @@ resource "aws_s3_bucket_public_access_block" "waf_block" {
   bucket = aws_s3_bucket.waf_logs.id
 
   block_public_acls   = true
-  block_public_policy = true
+  block_public_policy = false
   ignore_public_acls  = true
-  restrict_public_buckets = true
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.waf_logs.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
+  bucket = aws_s3_bucket.waf_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
 }
 
 # ✅ MERGED POLICY
-resource "aws_s3_bucket_policy" "combined_policy" {
+
+resource "aws_s3_bucket_policy" "alb_logs_policy" {
   bucket = aws_s3_bucket.waf_logs.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid = "AWSLogDeliveryWrite"
         Effect = "Allow"
         Principal = {
-          Service = "logdelivery.elasticloadbalancing.amazonaws.com"
+          AWS = "arn:aws:iam::127311923021:root"
         }
-        Action   = "s3:PutObject"
-        Resource = "${aws_s3_bucket.waf_logs.arn}/*"
+        Action = "s3:PutObject"
+        Resource = "${aws_s3_bucket.waf_logs.arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
         Condition = {
           StringEquals = {
             "s3:x-amz-acl" = "bucket-owner-full-control"
           }
         }
+      },
+      {
+        Sid = "AWSLogDeliveryCheck"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::127311923021:root"
+        }
+        Action = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.waf_logs.arn
       }
     ]
   })
+}
+
+resource "aws_s3_bucket_ownership_controls" "ownership" {
+  bucket = aws_s3_bucket.waf_logs.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
 }
 
 # ---------------- ALB ----------------
@@ -219,8 +266,15 @@ resource "aws_lb" "app_alb" {
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = [aws_subnet.public_1.id, aws_subnet.public_2.id]
 
+  depends_on = [
+    aws_s3_bucket.waf_logs,
+    aws_s3_bucket_policy.alb_logs_policy
+  ]
+
+  enable_deletion_protection = true
+
   access_logs {
-    bucket  = aws_s3_bucket.waf_logs.id   # ✅ FIXED
+    bucket  = aws_s3_bucket.waf_logs.bucket
     enabled = true
   }
 }
@@ -242,16 +296,28 @@ resource "aws_lb_target_group" "app_tg" {
 }
 
 # ✅ FIXED LISTENER
+# resource "aws_lb_listener" "https_listener" {
+#   load_balancer_arn = aws_lb.app_alb.arn
+#   port              = 443
+#   protocol          = "HTTPS"
+#   ssl_policy        = "ELBSecurityPolicy-2016-08"
+#   # certificate_arn   = aws_acm_certificate.cert.arn   # REQUIRED
+
+#   default_action {
+#     type             = "forward"
+#     target_group_arn = aws_lb_target_group.app_tg.arn
+#   }
+# }
+
 resource "aws_lb_listener" "http_listener" {
   load_balancer_arn = aws_lb.app_alb.arn
-  port     = 80
-  protocol = "HTTP"
+  port              = 80
+  protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
+    type = "forward"
     target_group_arn = aws_lb_target_group.app_tg.arn
   }
-  
 }
 
 # ---------------- ECS ----------------
@@ -264,9 +330,43 @@ resource "aws_ecs_cluster" "app_cluster" {
   }
 }
 
+resource "aws_kms_key" "logs_key" {
+  description = "KMS key for CloudWatch logs"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid = "Allow CloudWatch Logs"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${var.aws_region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_cloudwatch_log_group" "ecs_logs" {
-  name = "/ecs/app"
-  retention_in_days = 7
+  name              = "/ecs/app"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.logs_key.arn
 }
 
 resource "aws_iam_role" "ecs_task_execution_role" {
@@ -301,7 +401,9 @@ resource "aws_ecs_task_definition" "app_task" {
   {
     name  = "app-container"
     essential = true
+    
     image = "272206396644.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest"
+    # readonlyRootFilesystem = true
 
     portMappings = [
       {
@@ -312,7 +414,7 @@ resource "aws_ecs_task_definition" "app_task" {
     environment = [
       {
         name  = "DATABASE_URL"
-        value = "sqlite:///./test.db"
+        value = "sqlite:////tmp/test.db"
       }
     ]
 
@@ -333,13 +435,23 @@ resource "aws_ecs_service" "app_service" {
   name            = "ecs-app-service"
   cluster         = aws_ecs_cluster.app_cluster.id
   task_definition = aws_ecs_task_definition.app_task.arn
-  launch_type     = "FARGATE"
-  desired_count   = 1
+
+  depends_on = [
+    aws_lb_listener.http_listener , 
+    aws_lb_target_group.app_tg
+  ]
+
+  launch_type = "FARGATE"
 
   network_configuration {
-    subnets         = [aws_subnet.public_1.id, aws_subnet.public_2.id]
+    subnets = [
+      aws_subnet.public_1.id,
+      aws_subnet.public_2.id
+    ]
+
     security_groups = [aws_security_group.ecs_sg.id]
-    assign_public_ip = false   # ✅ FIXED
+
+    assign_public_ip = true   # since using public subnets
   }
 
   load_balancer {
@@ -348,11 +460,16 @@ resource "aws_ecs_service" "app_service" {
     container_port   = 8000
   }
 
-  depends_on = [aws_lb_listener.http_listener]
+  desired_count = 1
 }
 
 resource "aws_ecr_repository" "fastapi_repo" {
-  name                 = "fastapi-repo"
+  name = "fastapi-repo"
+
+  encryption_configuration {
+    encryption_type = "KMS"
+  }
+
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {

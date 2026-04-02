@@ -37,10 +37,10 @@ jobs:
           pip-audit --strict
 
     #---Terraform security scan
-      # - name: Terraform security scan
-      #   run: |
-      #     pip install checkov
-      #     checkov -d terraform/
+      - name: Terraform security scan
+        run: |
+          pip install checkov
+          checkov -d terraform/
 
     #---configure aws credentials
       - name: AWS configure

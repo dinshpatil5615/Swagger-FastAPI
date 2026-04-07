@@ -8,15 +8,6 @@ resource "aws_vpc" "main_vpc" {
   tags = { Name = "ecs-vpc" }
 }
 
-resource "aws_flow_log" "vpc_flow_logs" {
-  vpc_id = aws_vpc.main_vpc.id
-  traffic_type = "ALL"
-
-  log_destination_type = "cloud-watch-logs"
-  log_destination       = aws_cloudwatch_log_group.ecs_logs.arn
-  iam_role_arn         = aws_iam_role.ecs_task_execution_role.arn
-}
-
 resource "aws_internet_gateway" "IGW" {
   vpc_id = aws_vpc.main_vpc.id
 }
@@ -62,7 +53,7 @@ resource "aws_default_security_group" "default" {
 }
 
 resource "aws_security_group" "alb_sg" {
-  name        = "ecs-alb-sg"
+  name        = "alb-sg"
   description = "ALB security group"
   vpc_id      = aws_vpc.main_vpc.id
 
@@ -91,26 +82,96 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
-resource "aws_security_group" "ecs_sg" {
-  name        = "ecs-task-sg"
-  description = "Allow traffic only from ALB"
-  vpc_id      = aws_vpc.main_vpc.id
+# ---------------- IAM ----------------
 
-  ingress {
-    description     = "Allow app traffic from ALB"
-    from_port       = 8000
-    to_port         = 8000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "eks-cluster-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "eks.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+# ---------------- EKS ----------------
+
+resource "aws_eks_cluster" "main" {
+  name = "fastapi-eks-cluster"
+  role_arn = aws_iam_role.eks_cluster_role.arn
+
+  vpc_config {
+    subnet_ids = [
+      aws_subnet.public_1.id ,
+      aws_subnet.public_2.id
+    ]
+  }
+  depends_on = [ aws_iam_role_policy_attachment.eks_cluster_policy ]
+}
+
+resource "aws_iam_role" "eks_node_role" {
+  name = "eks-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "worker_node_policy" {
+  role = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "cni_policy" {
+  role = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "registry_policy" {
+  role = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_eks_node_group" "nodes" {
+  cluster_name = aws_eks_cluster.main.name
+  node_group_name = "FastAPI_nodes"
+  node_role_arn = aws_iam_role.eks_node_role.arn
+
+  subnet_ids = [
+    aws_subnet.public_1.id ,
+    aws_subnet.public_2.id
+  ]
+
+  scaling_config {
+    desired_size = 2
+    max_size = 3
+    min_size = 1
   }
 
-  egress {
-    description = "Allow HTTPS outbound"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  instance_types = ["t3.small"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.worker_node_policy ,
+    aws_iam_role_policy_attachment.cni_policy ,
+    aws_iam_role_policy_attachment.registry_policy
+  ]
 }
 
 # ---------------- WAF ----------------
@@ -322,13 +383,6 @@ resource "aws_lb_listener" "http_listener" {
 
 # ---------------- ECS ----------------
 
-resource "aws_ecs_cluster" "app_cluster" {
-  name = "ecs-app-cluster"
-  setting {
-    name  = "containerInsights"
-    value = "enabled"
-  }
-}
 
 resource "aws_kms_key" "logs_key" {
   description = "KMS key for CloudWatch logs"
@@ -363,105 +417,6 @@ resource "aws_kms_key" "logs_key" {
   })
 }
 
-resource "aws_cloudwatch_log_group" "ecs_logs" {
-  name              = "/ecs/app"
-  retention_in_days = 365
-  kms_key_id        = aws_kms_key.logs_key.arn
-}
-
-resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "ecsTaskExecutionRole"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
-  role = aws_iam_role.ecs_task_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-resource "aws_ecs_task_definition" "app_task" {
-  family                   = "ecs-app-task"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-
-  cpu    = "256"
-  memory = "512"
-
-  execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
-
-  container_definitions = jsonencode([
-  {
-    name  = "app-container"
-    essential = true
-    
-    image = "272206396644.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest"
-    # readonlyRootFilesystem = true
-
-    portMappings = [
-      {
-        containerPort = 8000
-        hostPort      = 8000
-      }
-    ]
-    environment = [
-      {
-        name  = "DATABASE_URL"
-        value = "sqlite:////tmp/test.db"
-      }
-    ]
-
-    # ✅ ADD THIS BLOCK
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = "/ecs/app"
-        awslogs-region        = var.aws_region
-        awslogs-stream-prefix = "ecs"
-      }
-    }
-  }
-])
-}
-
-resource "aws_ecs_service" "app_service" {
-  name            = "ecs-app-service"
-  cluster         = aws_ecs_cluster.app_cluster.id
-  task_definition = aws_ecs_task_definition.app_task.arn
-
-  depends_on = [
-    aws_lb_listener.http_listener , 
-    aws_lb_target_group.app_tg
-  ]
-
-  launch_type = "FARGATE"
-
-  network_configuration {
-    subnets = [
-      aws_subnet.public_1.id,
-      aws_subnet.public_2.id
-    ]
-
-    security_groups = [aws_security_group.ecs_sg.id]
-
-    assign_public_ip = true   # since using public subnets
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.app_tg.arn
-    container_name   = "app-container"
-    container_port   = 8000
-  }
-
-  desired_count = 1
-}
 
 resource "aws_ecr_repository" "fastapi_repo" {
   name = "fastapi-repo"

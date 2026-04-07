@@ -11,4 +11,4 @@ app.include_router(auth_router)
 
 @app.get("/health")
 def health():
-    return {"status": "Working fine"}
+    return {"status": "Hello from image 45"}

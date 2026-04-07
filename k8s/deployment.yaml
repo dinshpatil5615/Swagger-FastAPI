@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-app
+spec:
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+    spec:
+      containers:
+      - name: fastapi
+        image: 272206396644.dkr.ecr.us-east-1.amazonaws.com/fastapi-repo:latest
+        env:
+          - name: DATABASE_URL
+            value: sqlite:////tmp/test.db
+        ports:
+        - containerPort: 8000

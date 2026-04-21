@@ -7,7 +7,7 @@ This project demonstrates a **production-grade DevOps pipeline** to deploy a con
 It includes:
 
 * Containerization using Docker
-* Deployment on AWS ECS (Fargate)
+* Deployment on AWS EKS (Kubernetes)
 * CI/CD pipeline using GitHub Actions
 * Security scanning integrated into pipeline (DevSecOps)
 * Infrastructure provisioning using Terraform
@@ -24,7 +24,7 @@ Docker Build + Security Scan
         ↓
 Push Image → Amazon ECR
         ↓
-Amazon ECS (Fargate)
+Amazon EKS (Kubernetes)
         ↓
 Application Load Balancer (ALB)
         ↓
@@ -35,7 +35,7 @@ FastAPI Application (/docs)
 
 ## ⚙️ Tech Stack
 
-* AWS ECS (Fargate)
+* AWS EKS (Kubernetes)
 * AWS ECR
 * AWS ALB
 * Terraform
@@ -63,7 +63,7 @@ Security is integrated directly into the CI/CD pipeline:
 4. Docker image built
 5. Image tagged using build number
 6. Image pushed to Amazon ECR
-7. ECS service updated with new image
+7. EKS service updated with new image
 8. Application deployed via ALB
 
 ---
@@ -91,7 +91,7 @@ latest
 
 Infrastructure is fully managed using Terraform:
 
-* ECS Cluster & Service
+* EKS Cluster
 * Load Balancer & Target Groups
 * Networking (VPC, Subnets, IGW)
 
@@ -139,7 +139,7 @@ Access FastAPI Swagger UI.
 
 * Fully automated CI/CD pipeline
 * Secure DevSecOps workflow
-* Scalable container deployment using ECS
+* Scalable container deployment using EKS
 * Infrastructure as Code using Terraform
 * Production-style architecture
 
@@ -147,7 +147,7 @@ Access FastAPI Swagger UI.
 
 ## 🎯 Learning Outcomes
 
-* Hands-on experience with AWS ECS & ECR
+* Hands-on experience with AWS EKS & ECR
 * Built end-to-end CI/CD pipeline
 * Implemented security in DevOps workflow
 * Learned Terraform remote state management
@@ -159,7 +159,7 @@ Access FastAPI Swagger UI.
 
 * Blue-Green Deployment
 * Monitoring with CloudWatch
-* Auto Scaling for ECS
+* Auto Scaling for EKS
 * Custom domain with HTTPS
 
 ---
